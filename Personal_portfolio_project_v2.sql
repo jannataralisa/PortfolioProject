@@ -1,0 +1,164 @@
+
+
+	--Looking at total death vs new case
+	SELECT location,date, total_cases, total_deaths, new_cases, population
+	FROM [dbo].[CovidDeaths]
+	ORDER BY 1,2
+
+	--Looking total death vs total cases in percentage
+	SELECT location,date, total_cases, total_deaths, (total_deaths/total_cases)*100 AS DeathPercentage
+	FROM [dbo].[CovidDeaths]
+	WHERE continent is not null
+	ORDER BY 1,2
+
+--Likelihood of dying in country Bangladesh
+
+	SELECT location,date, total_cases, total_deaths, (total_deaths/total_cases)*100 AS DeathPercentage
+	FROM [dbo].[CovidDeaths]
+	WHERE continent is not null
+	and location like '%Bangladesh%'
+	ORDER BY 1,2
+
+	--Show total percentage of people infected with covid
+
+	SELECT location,date, total_cases, population, (total_cases/population)*100 AS PopulationInfectedPercentage
+	FROM [dbo].[CovidDeaths]
+	WHERE continent is not null
+	--and location like '%Bangladesh%'
+	ORDER BY 1,2
+
+	--Highest Infected rate countries compared to population
+	SELECT location,MAX(total_cases) AS Total_cases, population, MAX(total_cases/population)*100 AS PopulationInfectedPercentage
+	FROM [dbo].[CovidDeaths]
+	WHERE continent is not null
+	--and location like '%Bangladesh%'
+	Group BY location, population
+	ORDER BY PopulationInfectedPercentage DESC
+
+	-- Countries with highest death rate compared to population
+
+	SELECT location,COUNT(total_deaths) AS totaldeathcount
+	FROM [dbo].[CovidDeaths]
+	WHERE continent is not null
+	--and location like '%Bangladesh%'
+	Group BY location
+	ORDER BY totaldeathcount DESC
+
+	-- Countries with Highest Death Count per Population
+
+Select Location, MAX(cast(Total_deaths as int)) as TotalDeathCount
+FROM [dbo].[CovidDeaths]
+Where continent is not null 
+Group by Location
+order by TotalDeathCount desc
+
+
+	--breaking down to continent
+	--continent wise total death count
+	
+	SELECT continent, MAX(cast(total_deaths as int)) AS totaldeathcount
+	FROM [dbo].[CovidDeaths]
+	WHERE continent is not null
+	Group BY continent
+	ORDER BY totaldeathcount DESC
+
+	-- GLOBAL NUMBERS of death and new cases
+
+Select SUM(new_cases) as total_cases, SUM(cast(new_deaths as int)) as total_deaths, SUM(cast(new_deaths as int))/SUM(New_Cases)*100 as DeathPercentage
+FROM [dbo].[CovidDeaths]
+where continent is not null 
+order by 1,2
+
+-- Total Population vs Vaccinations
+-- Shows Percentage of Population that has recieved at least one Covid Vaccine
+SELECT d.continent, d.location,d.population,d.date, vac.new_vaccinations,
+SUM(CAST(vac.new_vaccinations as int)) OVER (PARTITION BY d.location order by d.date) as Rollingpeoplevaccinated
+FROM [dbo].[CovidDeaths] as d
+Join [dbo].[CovidVaccinations] as vac
+	ON d.location=vac.location
+	and d.date=vac.date 
+where d.continent is not null and vac.new_vaccinations is not null
+order by 2,3 
+
+-- Using CTE to perform Calculation on Partition By in previous query
+
+WITH my_cte(continent, location,population,date,new_vaccinations, Rollingpeoplevaccinated)
+AS
+(
+SELECT d.continent, d.location,d.population,d.date, vac.new_vaccinations,
+SUM(CONVERT(int, vac.new_vaccinations)) OVER (PARTITION BY d.location order by d.date) as Rollingpeoplevaccinated
+FROM [dbo].[CovidDeaths] as d
+Join [dbo].[CovidVaccinations] as vac
+	ON d.location=vac.location
+	and d.date=vac.date 
+where d.continent is not null and vac.new_vaccinations is not null
+)
+
+SELECT *, (Rollingpeoplevaccinated/population)* 100 as Percentageofpeoplevacc
+FROM my_cte 
+ORDER BY Percentageofpeoplevacc DESC 
+
+--CREATE procedure
+
+CREATE or ALTER PROCEDURE peoplevaccpercentage
+(
+@location nvarchar(50)
+)
+AS
+BEGIN
+
+	SELECT d.continent, d.location,d.population,d.date, vac.new_vaccinations,
+	SUM(CONVERT(int, vac.new_vaccinations)) OVER (PARTITION BY d.location order by d.date) as Rollingpeoplevaccinated
+	FROM [dbo].[CovidDeaths] as d
+	Join [dbo].[CovidVaccinations] as vac
+		ON d.location=vac.location
+		and d.date=vac.date 
+	where d.continent is not null and d.location=@location
+	and vac.new_vaccinations is not null
+
+END
+EXEC peoplevaccpercentage @location='Bangladesh'
+
+
+-- Using Temp Table to perform Calculation on Partition By in previous query
+
+DROP Table if exists #PercentPopulationVaccinated
+Create Table #PercentPopulationVaccinated
+(
+continent nvarchar(255),
+location nvarchar(255),
+date datetime,
+population numeric,
+new_vaccinations numeric,
+RollingpeopleVaccinated numeric
+)
+
+Insert into #PercentPopulationVaccinated
+SELECT d.continent, d.location,d.date,d.population, vac.new_vaccinations,
+	SUM(CONVERT(numeric, vac.new_vaccinations)) OVER (PARTITION BY d.location order by d.date) as Rollingpeoplevaccinated
+	FROM [dbo].[CovidDeaths] as d
+	Join [dbo].[CovidVaccinations] as vac
+		ON d.location=vac.location
+		and d.date=vac.date 
+	where d.continent is not null 
+	and vac.new_vaccinations is not null
+order by 2,3 
+
+Select *, (RollingpeopleVaccinated/population)*100 AS percentageofpeoplevacc
+From #PercentPopulationVaccinated
+
+
+--Create view for storing datat for visualization
+
+CREATE view pecentof_population_vaccinated 
+AS
+SELECT d.continent, d.location,d.date,d.population, vac.new_vaccinations,
+	SUM(CONVERT(numeric, vac.new_vaccinations)) OVER (PARTITION BY d.location order by d.date) as Rollingpeoplevaccinated
+	FROM [dbo].[CovidDeaths] as d
+	Join [dbo].[CovidVaccinations] as vac
+		ON d.location=vac.location
+		and d.date=vac.date 
+	where d.continent is not null 
+	and vac.new_vaccinations is not null 
+
+ select * from pecentof_population_vaccinated 
